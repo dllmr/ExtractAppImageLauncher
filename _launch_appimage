@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Check if a parameter is passed
+if [[ -z "$1" ]]; then
+    echo "Usage: $0 <executable_name_prefix> [additional_args]"
+    exit 1
+fi
+
+# Get the desired executable name prefix from the first parameter
+EXECUTABLE_PREFIX="$1"
+# Shift the first parameter off so remaining args can be passed to the executable
+shift
+
+# Get the directory in which the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Find the first executable file starting with the given prefix (case-insensitive)
+EXECUTABLE_FILE=$(find "$SCRIPT_DIR" -maxdepth 1 -type f -iname "${EXECUTABLE_PREFIX}*" -executable | head -n 1)
+
+# Check if a file was found
+if [[ -n "$EXECUTABLE_FILE" ]]; then
+    # Extract the filename without the path
+    EXECUTABLE_NAME=$(basename "$EXECUTABLE_FILE")
+
+    # Check if this executable is already running
+    if ps aux | grep -v grep | grep -q "$EXECUTABLE_NAME"; then
+        echo "An instance of '$EXECUTABLE_NAME' is already running."
+    else
+        echo "Executing '$EXECUTABLE_FILE' with additional arguments"
+        # Execute the file with all remaining parameters
+        "$EXECUTABLE_FILE" "$@" &
+    fi
+else
+    echo "No executable file found starting with '$EXECUTABLE_PREFIX' in $SCRIPT_DIR"
+fi
