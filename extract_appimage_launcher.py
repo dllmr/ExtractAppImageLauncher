@@ -250,14 +250,17 @@ def create_backup(file_path: Path) -> Optional[Path]:
     if not file_path.exists():
         return None
         
-    # Create a backup with .bak extension
-    backup_path = file_path.with_suffix(file_path.suffix + '.bak')
+    # Create a backup while preserving the original extension
+    # Format: filename.bak.extension instead of filename.extension.bak
+    stem = file_path.stem
+    extension = file_path.suffix
+    backup_path = file_path.with_name(f"{stem}.bak{extension}")
     
     # If backup already exists, use a numbered backup
     counter = 1
     original_backup_path = backup_path
     while backup_path.exists():
-        backup_path = original_backup_path.with_name(f"{original_backup_path.stem}.{counter}{original_backup_path.suffix}")
+        backup_path = file_path.with_name(f"{stem}.bak.{counter}{extension}")
         counter += 1
     
     shutil.copy2(file_path, backup_path)
