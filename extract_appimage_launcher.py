@@ -1,113 +1,202 @@
 #!/usr/bin/env python3
 
+import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
-import subprocess
-import shutil
-import os
 from pathlib import Path
-import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 def extract_appimage(appimage_path: Path, extract_dir: Path) -> None:
-    """Extract AppImage contents to specified directory."""
+    """
+    Extract AppImage contents to specified directory.
+    
+    Args:
+        appimage_path: Path to the AppImage file
+        extract_dir: Directory where contents will be extracted
+    
+    Raises:
+        Exception: If extraction fails
+    """
     # Convert to absolute path to ensure it's found regardless of working directory
     absolute_appimage_path = appimage_path.absolute()
+    
     try:
-        subprocess.run([str(absolute_appimage_path), "--appimage-extract"],
-                      cwd=extract_dir,
-                      stdout=subprocess.DEVNULL,
-                      check=True)
-    except subprocess.CalledProcessError:
-        raise Exception(f"Failed to extract AppImage with command: {absolute_appimage_path} --appimage-extract")
+        # Use a context manager for better resource handling
+        subprocess.run(
+            [str(absolute_appimage_path), "--appimage-extract"],
+            cwd=extract_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"Failed to extract AppImage: {e.stderr.strip() if e.stderr else 'Unknown error'}")
     except FileNotFoundError:
         raise Exception(f"AppImage file not found at: {absolute_appimage_path}")
 
 def get_desktop_file(extract_dir: Path) -> Optional[Path]:
-    """Find the .desktop file in the extracted AppImage."""
+    """
+    Find the .desktop file in the extracted AppImage.
+    
+    Args:
+        extract_dir: Directory containing extracted AppImage
+        
+    Returns:
+        Path to the desktop file or None if not found
+    """
     desktop_files = list(extract_dir.glob("squashfs-root/**/*.desktop"))
-    return desktop_files[0] if desktop_files else None
+    
+    if not desktop_files:
+        return None
+        
+    # If multiple desktop files exist, prefer ones in standard locations
+    for location in ["usr/share/applications", "usr/local/share/applications"]:
+        for file in desktop_files:
+            if location in str(file):
+                return file
+    
+    # Otherwise return the first one found
+    return desktop_files[0]
 
 def parse_icon_name(desktop_file: Path) -> Optional[str]:
-    """Extract icon name from .desktop file."""
-    with open(desktop_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.startswith('Icon='):
-                return line.strip().split('=')[1]
+    """
+    Extract icon name from .desktop file.
+    
+    Args:
+        desktop_file: Path to the .desktop file
+        
+    Returns:
+        Icon name or None if not found
+    """
+    try:
+        with open(desktop_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('Icon='):
+                    return line.strip().split('=', 1)[1]  # Allow for = in icon names
+    except UnicodeDecodeError:
+        # Try with latin-1 encoding if utf-8 fails
+        try:
+            with open(desktop_file, 'r', encoding='latin-1') as f:
+                for line in f:
+                    if line.startswith('Icon='):
+                        return line.strip().split('=', 1)[1]
+        except Exception:
+            pass
+    except Exception:
+        pass
+            
     return None
 
 def find_best_icon(extract_dir: Path, icon_name: str) -> Optional[Tuple[Path, str]]:
     """
     Find the best available icon file.
-    Returns tuple of (icon_path, extension) or None if not found.
+    
+    Args:
+        extract_dir: Directory containing extracted AppImage
+        icon_name: Name of the icon to find
+        
+    Returns:
+        Tuple of (icon_path, extension) or None if not found
     """
     squashfs_root = extract_dir / "squashfs-root"
-
-    # Common icon locations
-    icon_dirs = [
-        squashfs_root / "usr/share/icons",
+    
+    # Prioritized list of icon sizes (from best to acceptable)
+    prioritized_sizes = ["scalable", "512x512", "256x256", "128x128", "64x64", "48x48", "32x32", "16x16"]
+    
+    # Common icon locations with priority order
+    icon_dirs: List[Path] = []
+    
+    # Standard icon directories
+    for theme in ["hicolor", "Humanity", "breeze", "Adwaita"]:
+        for size in prioritized_sizes:
+            icon_dirs.extend([
+                squashfs_root / f"usr/share/icons/{theme}/{size}/apps",
+                squashfs_root / f"usr/share/icons/{theme}/{size}/mimetypes",
+            ])
+    
+    # Additional locations
+    icon_dirs.extend([
         squashfs_root / "usr/share/pixmaps",
+        squashfs_root / "usr/share/icons",
         squashfs_root / ".DirIcon",
         squashfs_root
-    ]
+    ])
 
-    # First, look for exact matches
+    # First, look for exact matches with preferred formats
     for icon_dir in icon_dirs:
-        if not icon_dir.exists():
+        if not icon_dir.exists() or not icon_dir.is_dir():
             continue
 
-        # Check for SVG first
-        svg_candidates = list(icon_dir.rglob(f"{icon_name}.svg"))
+        # Check for SVG first (vector is preferred)
+        svg_candidates = list(icon_dir.glob(f"{icon_name}.svg"))
         if svg_candidates:
             return (svg_candidates[0], '.svg')
 
         # Then check for PNG
-        png_candidates = list(icon_dir.rglob(f"{icon_name}.png"))
+        png_candidates = list(icon_dir.glob(f"{icon_name}.png"))
         if png_candidates:
             # If multiple PNGs exist, find the largest one
-            largest_png = max(png_candidates, key=lambda p: p.stat().st_size)
-            return (largest_png, '.png')
+            if len(png_candidates) > 1:
+                largest_png = max(png_candidates, key=lambda p: p.stat().st_size)
+                return (largest_png, '.png')
+            return (png_candidates[0], '.png')
+            
+        # Then check for other image formats
+        for ext in ['.jpg', '.jpeg', '.ico']:
+            candidates = list(icon_dir.glob(f"{icon_name}{ext}"))
+            if candidates:
+                return (candidates[0], ext)
 
-    # If no exact matches, look for similar names
+    # If no exact matches, look for similar names (case-insensitive)
+    icon_name_lower = icon_name.lower()
     for icon_dir in icon_dirs:
-        if not icon_dir.exists():
+        if not icon_dir.exists() or not icon_dir.is_dir():
             continue
 
         # Look for SVGs first
-        svg_candidates = list(icon_dir.rglob("*.svg"))
+        svg_candidates = list(icon_dir.glob("*.svg"))
         for svg in svg_candidates:
-            if icon_name.lower() in svg.stem.lower():
+            if icon_name_lower in svg.stem.lower():
                 return (svg, '.svg')
 
         # Then look for PNGs
-        png_candidates = list(icon_dir.rglob("*.png"))
-        if png_candidates:
-            # Filter for ones containing the icon name
-            matching_pngs = [p for p in png_candidates
-                           if icon_name.lower() in p.stem.lower()]
-            if matching_pngs:
-                largest_png = max(matching_pngs, key=lambda p: p.stat().st_size)
-                return (largest_png, '.png')
+        png_candidates = list(icon_dir.glob("*.png"))
+        matching_pngs = [p for p in png_candidates if icon_name_lower in p.stem.lower()]
+        if matching_pngs:
+            largest_png = max(matching_pngs, key=lambda p: p.stat().st_size)
+            return (largest_png, '.png')
 
     # Check if .DirIcon exists and is an image
     diricon = squashfs_root / ".DirIcon"
-    if diricon.exists():
+    if diricon.exists() and diricon.is_file():
         # Try to determine file type from contents
-        with open(diricon, 'rb') as f:
-            magic_number = f.read(4)
-            if magic_number.startswith(b'\x89PNG'):
-                return (diricon, '.png')
-            elif b'<?xml' in magic_number or b'<svg' in magic_number:
-                return (diricon, '.svg')
+        try:
+            with open(diricon, 'rb') as f:
+                magic_number = f.read(8)  # Read a bit more for better detection
+                if magic_number.startswith(b'\x89PNG'):
+                    return (diricon, '.png')
+                elif b'<?xml' in magic_number or b'<svg' in magic_number:
+                    return (diricon, '.svg')
+                elif magic_number.startswith(b'\xff\xd8'):  # JPEG signature
+                    return (diricon, '.jpg')
+        except Exception:
+            pass  # If we can't read the file, just skip it
 
     return None
 
 def clean_app_name(appimage_path: str) -> str:
-    """Clean the AppImage filename to create a base for the icon filename.
-
-    Removes version, date, architecture, OS, build tags, and other common noise,
-    while preserving the original case.
-    Cleans the remaining string to contain only letters, digits, and hyphens.
+    """
+    Clean the AppImage filename to create a base for the icon filename.
+    
+    Args:
+        appimage_path: Path to the AppImage file
+        
+    Returns:
+        Cleaned name suitable for icon filename
     """
     name = Path(appimage_path).stem # Start with original case stem
 
@@ -149,61 +238,97 @@ def clean_app_name(appimage_path: str) -> str:
     return name
 
 def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_extension: str, output_dir: Path) -> None:
-    """Creates a new .desktop file based on the original, modifying Icon and Exec lines,
-       and removing Actions and related sections."""
+    """
+    Creates a new .desktop file based on the original, modifying Icon and Exec lines,
+    and removing Actions and related sections.
+    
+    Args:
+        original_desktop_path: Path to the original .desktop file
+        clean_name: Cleaned name of the AppImage
+        icon_extension: File extension of the icon
+        output_dir: Directory where the new .desktop file will be created
+    """
     new_desktop_path = output_dir / f"AppImage-{clean_name}.desktop"
     
-    # Get the full home directory path instead of using ~
+    # Get the full home directory path
     home_dir = str(Path.home())
     appimage_dir = os.path.join(home_dir, "AppImage")
     
     new_icon_entry = f"Icon={appimage_dir}/{clean_name}{icon_extension}"
     new_exec_entry = f"Exec={appimage_dir}/_launch_appimage {clean_name} %U"
 
-    in_action_section = False
+    
     try:
+        # Try with utf-8 encoding first
         with open(original_desktop_path, 'r', encoding='utf-8') as infile, \
              open(new_desktop_path, 'w', encoding='utf-8') as outfile:
-            for line in infile:
-                stripped_line = line.strip()
-
-                # Check for section headers
-                if stripped_line.startswith('[') and stripped_line.endswith(']'):
-                    section_name = stripped_line[1:-1]
-                    # Check if it's a Desktop Action section (case-insensitive)
-                    if "desktop action" in section_name.lower():
-                        in_action_section = True
-                        continue # Skip the action section header itself
-                    else:
-                        in_action_section = False
-                        outfile.write(line) # Write other section headers
-                        continue # Process next line
-
-                # Skip lines within an action section
-                if in_action_section:
-                    continue
-
-                # Process lines outside action sections
-                if stripped_line.startswith('Icon='):
-                    outfile.write(new_icon_entry + '\n')
-                elif stripped_line.startswith('Exec='):
-                    outfile.write(new_exec_entry + '\n')
-                elif stripped_line.startswith('X-AppImage-Version='):
-                    pass # Skip this line
-                elif stripped_line.startswith('Actions='):
-                    pass # Skip this line
-                else:
-                    # Write any other line that isn't skipped
-                    outfile.write(line)
-
+            _process_desktop_file(infile, outfile, new_icon_entry, new_exec_entry)
+            
         print(f".desktop file created at: {new_desktop_path}")
+        
+    except UnicodeDecodeError:
+        # If utf-8 fails, try with latin-1
+        try:
+            with open(original_desktop_path, 'r', encoding='latin-1') as infile, \
+                 open(new_desktop_path, 'w', encoding='utf-8') as outfile:
+                _process_desktop_file(infile, outfile, new_icon_entry, new_exec_entry)
+                
+            print(f".desktop file created at: {new_desktop_path}")
+            
+        except OSError as e:
+            print(f"Error creating .desktop file {new_desktop_path}: {e}")
     except OSError as e:
         print(f"Error creating .desktop file {new_desktop_path}: {e}")
-        # Don't exit the whole script, just report the error for this part.
+
+def _process_desktop_file(infile, outfile, new_icon_entry: str, new_exec_entry: str) -> None:
+    """
+    Helper function to process desktop file contents.
+    
+    Args:
+        infile: Input file object
+        outfile: Output file object
+        new_icon_entry: New Icon entry
+        new_exec_entry: New Exec entry
+    """
+    in_action_section = False
+    
+    for line in infile:
+        stripped_line = line.strip()
+
+        # Check for section headers
+        if stripped_line.startswith('[') and stripped_line.endswith(']'):
+            section_name = stripped_line[1:-1]
+            # Check if it's a Desktop Action section (case-insensitive)
+            if "desktop action" in section_name.lower():
+                in_action_section = True
+                continue # Skip the action section header itself
+            else:
+                in_action_section = False
+                outfile.write(line) # Write other section headers
+                continue # Process next line
+
+        # Skip lines within an action section
+        if in_action_section:
+            continue
+
+        # Process lines outside action sections
+        if stripped_line.startswith('Icon='):
+            outfile.write(new_icon_entry + '\n')
+        elif stripped_line.startswith('Exec='):
+            outfile.write(new_exec_entry + '\n')
+        elif stripped_line.startswith('X-AppImage-Version='):
+            pass # Skip this line
+        elif stripped_line.startswith('Actions='):
+            pass # Skip this line
+        elif stripped_line.startswith('TryExec='):
+            pass # Skip this line
+        else:
+            # Write any other line that isn't skipped
+            outfile.write(line)
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: extract_appimage_icon.py <appimage_file>")
+        print("Usage: extract_appimage_launcher.py <appimage_file>")
         sys.exit(1)
 
     appimage_path = Path(sys.argv[1])
@@ -253,18 +378,18 @@ def main():
             
             # Combined reminder for complete setup
             desktop_file_name = f"AppImage-{clean_name}.desktop"
-            print(f"\nSetup Instructions:")
-            print(f"For your AppImage to work with the launcher, please complete these steps:")
-            print(f"1. Create the required directories:")
-            print(f"   mkdir -p ~/.local/share/applications/ ~/AppImage")
-            print(f"2. Place the extracted icon and AppImage in the AppImage directory:")
+            print("\nSetup Instructions:")
+            print("For your AppImage to work with the launcher, please complete these steps:")
+            print("1. Create the required directories:")
+            print("   mkdir -p ~/.local/share/applications/ ~/AppImage")
+            print("2. Place the extracted icon and AppImage in the AppImage directory:")
             print(f"   cp {clean_name}{extension} ~/AppImage/")
             print(f"   cp {appimage_path.name} ~/AppImage/")
-            print(f"3. Copy the _launch_appimage script and make it executable:")
-            print(f"   cp _launch_appimage ~/AppImage/ && chmod +x ~/AppImage/_launch_appimage")
-            print(f"4. Install the desktop file to make the app appear in your system menu:")
+            print("3. Copy the _launch_appimage script and make it executable:")
+            print("   cp _launch_appimage ~/AppImage/ && chmod +x ~/AppImage/_launch_appimage")
+            print("4. Install the desktop file to make the app appear in your system menu:")
             print(f"   cp {desktop_file_name} ~/.local/share/applications/")
-            print(f"Once completed, your application should appear in your desktop environment's application menu.")
+            print("Once completed, your application should appear in your desktop environment's application menu.")
 
         except subprocess.CalledProcessError:
             print("Error: Failed to extract AppImage")
