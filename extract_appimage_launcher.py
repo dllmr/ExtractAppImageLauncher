@@ -237,6 +237,32 @@ def clean_app_name(appimage_path: str) -> str:
 
     return name
 
+def create_backup(file_path: Path) -> Optional[Path]:
+    """
+    Create a backup of a file if it exists.
+    
+    Args:
+        file_path: Path to the file to backup
+        
+    Returns:
+        Path to the backup file or None if no backup was created
+    """
+    if not file_path.exists():
+        return None
+        
+    # Create a backup with .bak extension
+    backup_path = file_path.with_suffix(file_path.suffix + '.bak')
+    
+    # If backup already exists, use a numbered backup
+    counter = 1
+    original_backup_path = backup_path
+    while backup_path.exists():
+        backup_path = original_backup_path.with_name(f"{original_backup_path.stem}.{counter}{original_backup_path.suffix}")
+        counter += 1
+    
+    shutil.copy2(file_path, backup_path)
+    return backup_path
+
 def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_extension: str, output_dir: Path) -> None:
     """
     Creates a new .desktop file based on the original, modifying Icon and Exec lines,
@@ -249,6 +275,11 @@ def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_exten
         output_dir: Directory where the new .desktop file will be created
     """
     new_desktop_path = output_dir / f"AppImage-{clean_name}.desktop"
+    
+    # Create a backup if the file exists
+    backup_path = create_backup(new_desktop_path)
+    if backup_path:
+        print(f"Created backup of existing desktop file at: {backup_path}")
     
     # Get the full home directory path
     home_dir = str(Path.home())
@@ -368,6 +399,11 @@ def main():
             # Create output filename
             clean_name = clean_app_name(appimage_path.name)
             output_icon_path = Path.cwd() / f"{clean_name}{extension}"
+            
+            # Create a backup if the icon file exists
+            backup_path = create_backup(output_icon_path)
+            if backup_path:
+                print(f"Created backup of existing icon at: {backup_path}")
 
             # Copy icon to current directory
             shutil.copy2(icon_path, output_icon_path)
