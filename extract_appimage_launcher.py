@@ -250,6 +250,21 @@ def main():
 
             # Create the .desktop file
             create_desktop_file(desktop_file, clean_name, extension, Path.cwd())
+            
+            # Combined reminder for complete setup
+            desktop_file_name = f"AppImage-{clean_name}.desktop"
+            print(f"\nSetup Instructions:")
+            print(f"For your AppImage to work with the launcher, please complete these steps:")
+            print(f"1. Create the required directories:")
+            print(f"   mkdir -p ~/.local/share/applications/ ~/AppImage")
+            print(f"2. Place the extracted icon and AppImage in the AppImage directory:")
+            print(f"   cp {clean_name}{extension} ~/AppImage/")
+            print(f"   cp {appimage_path.name} ~/AppImage/")
+            print(f"3. Copy the _launch_appimage script and make it executable:")
+            print(f"   cp _launch_appimage ~/AppImage/ && chmod +x ~/AppImage/_launch_appimage")
+            print(f"4. Install the desktop file to make the app appear in your system menu:")
+            print(f"   cp {desktop_file_name} ~/.local/share/applications/")
+            print(f"Once completed, your application should appear in your desktop environment's application menu.")
 
         except subprocess.CalledProcessError:
             print("Error: Failed to extract AppImage")
