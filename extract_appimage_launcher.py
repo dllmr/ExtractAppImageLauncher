@@ -376,19 +376,35 @@ def main():
             # Create the .desktop file
             create_desktop_file(desktop_file, clean_name, extension, Path.cwd())
             
+            # Check if we're already in the AppImage directory
+            home_dir = str(Path.home())
+            appimage_dir = Path(os.path.join(home_dir, "AppImage"))
+            current_dir = Path.cwd().resolve()
+            already_in_appimage_dir = current_dir == appimage_dir
+
             # Combined reminder for complete setup
             desktop_file_name = f"AppImage-{clean_name}.desktop"
             print("\nSetup Instructions:")
-            print("For your AppImage to work with the launcher, please complete these steps:")
-            print("1. Create the required directories:")
-            print("   mkdir -p ~/.local/share/applications/ ~/AppImage")
-            print("2. Place the extracted icon and AppImage in the AppImage directory:")
-            print(f"   cp {clean_name}{extension} ~/AppImage/")
-            print(f"   cp {appimage_path.name} ~/AppImage/")
-            print("3. Copy the _launch_appimage script and make it executable:")
-            print("   cp _launch_appimage ~/AppImage/ && chmod +x ~/AppImage/_launch_appimage")
-            print("4. Install the desktop file to make the app appear in your system menu:")
-            print(f"   cp {desktop_file_name} ~/.local/share/applications/")
+            
+            if already_in_appimage_dir:
+                print("You're already in the AppImage directory, so you only need to:")
+                print("1. Make sure the _launch_appimage script is executable:")
+                print("   chmod +x _launch_appimage")
+                print("2. Install the desktop file to make the app appear in your system menu:")
+                print("   mkdir -p ~/.local/share/applications/")
+                print(f"   cp {desktop_file_name} ~/.local/share/applications/")
+            else:
+                print("For your AppImage to work with the launcher, please complete these steps:")
+                print("1. Create the required directories:")
+                print("   mkdir -p ~/.local/share/applications/ ~/AppImage")
+                print("2. Place the extracted icon and AppImage in the AppImage directory:")
+                print(f"   cp {clean_name}{extension} ~/AppImage/")
+                print(f"   cp {appimage_path.name} ~/AppImage/")
+                print("3. Copy the _launch_appimage script and make it executable:")
+                print("   cp _launch_appimage ~/AppImage/ && chmod +x ~/AppImage/_launch_appimage")
+                print("4. Install the desktop file to make the app appear in your system menu:")
+                print(f"   cp {desktop_file_name} ~/.local/share/applications/")
+            
             print("Once completed, your application should appear in your desktop environment's application menu.")
 
         except subprocess.CalledProcessError:
