@@ -42,6 +42,8 @@ chmod +x extract_appimage_launcher.py
 ./extract_appimage_launcher.py ~/Downloads/cider-linux-x64.AppImage
 ```
 
+Alternatively run the script using uv.
+
 ## How It Works
 
 1. Extracts the AppImage to a temporary directory
