@@ -23,7 +23,7 @@ if [[ -n "$EXECUTABLE_FILE" ]]; then
     EXECUTABLE_NAME=$(basename "$EXECUTABLE_FILE")
 
     # Check if this executable is already running
-    if ps aux | grep -v grep | grep -q "$EXECUTABLE_NAME"; then
+    if ps aux | grep -v grep | grep -v _launch_appimage | grep -q "$EXECUTABLE_NAME"; then
         echo "An instance of '$EXECUTABLE_NAME' is already running."
     else
         echo "Executing '$EXECUTABLE_FILE' with additional arguments"
