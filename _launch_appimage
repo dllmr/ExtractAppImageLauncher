@@ -1,8 +1,17 @@
 #!/bin/bash
 
+# Optional leading flag: --foreground (-f) runs the app attached to the
+# controlling terminal instead of backgrounding it. Required for terminal/TUI
+# apps (.desktop Terminal=true), which need a controlling TTY to start.
+FOREGROUND=0
+if [[ "$1" == "--foreground" || "$1" == "-f" ]]; then
+    FOREGROUND=1
+    shift
+fi
+
 # Check if a parameter is passed
 if [[ -z "$1" ]]; then
-    echo "Usage: $0 <executable_name_prefix> [additional_args]"
+    echo "Usage: $0 [--foreground] <executable_name_prefix> [additional_args]"
     exit 1
 fi
 
@@ -22,8 +31,14 @@ if [[ -n "$EXECUTABLE_FILE" ]]; then
     # Extract the filename without the path
     EXECUTABLE_NAME=$(basename "$EXECUTABLE_FILE")
 
+    if [[ "$FOREGROUND" -eq 1 ]]; then
+        # Terminal/TUI app: run in the foreground so it owns the terminal.
+        # Multiple instances (one per terminal) are normal, so skip the
+        # already-running check and replace this shell with the app.
+        echo "Executing '$EXECUTABLE_FILE' in the foreground"
+        exec "$EXECUTABLE_FILE" "$@"
     # Check if this executable is already running
-    if ps aux | grep -v grep | grep -v _launch_appimage | grep -q "$EXECUTABLE_NAME"; then
+    elif ps aux | grep -v grep | grep -v _launch_appimage | grep -q "$EXECUTABLE_NAME"; then
         echo "An instance of '$EXECUTABLE_NAME' is already running."
     else
         echo "Executing '$EXECUTABLE_FILE' with additional arguments"

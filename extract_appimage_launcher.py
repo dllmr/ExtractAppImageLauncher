@@ -91,6 +91,34 @@ def parse_icon_name(desktop_file: Path) -> Optional[str]:
             
     return None
 
+def is_terminal_app(desktop_file: Path) -> bool:
+    """
+    Determine whether the AppImage is a terminal/TUI app.
+
+    A TUI app declares `Terminal=true` in its .desktop file (per the
+    freedesktop spec), meaning it must run attached to a controlling
+    terminal rather than as a backgrounded windowed app.
+
+    Args:
+        desktop_file: Path to the .desktop file
+
+    Returns:
+        True if the .desktop file sets Terminal=true, otherwise False
+    """
+    for encoding in ('utf-8', 'latin-1'):
+        try:
+            with open(desktop_file, 'r', encoding=encoding) as f:
+                for line in f:
+                    if line.strip().lower().startswith('terminal='):
+                        value = line.split('=', 1)[1].strip().lower()
+                        return value in ('true', '1', 'yes')
+            return False
+        except UnicodeDecodeError:
+            continue
+        except Exception:
+            return False
+    return False
+
 def find_best_icon(extract_dir: Path, icon_name: str) -> Optional[Tuple[Path, str]]:
     """
     Find the best available icon file.
@@ -266,16 +294,21 @@ def create_backup(file_path: Path) -> Optional[Path]:
     shutil.copy2(file_path, backup_path)
     return backup_path
 
-def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_extension: str, output_dir: Path) -> None:
+def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_extension: str, output_dir: Path, is_terminal: bool = False) -> None:
     """
     Creates a new .desktop file based on the original, modifying Icon and Exec lines,
     and removing Actions and related sections.
-    
+
     Args:
         original_desktop_path: Path to the original .desktop file
         clean_name: Cleaned name of the AppImage
         icon_extension: File extension of the icon
         output_dir: Directory where the new .desktop file will be created
+        is_terminal: Whether the app is a terminal/TUI app (Terminal=true). When
+            True, the launcher is invoked with --foreground so the app runs
+            attached to the terminal instead of being backgrounded. The original
+            Terminal=true line is preserved as-is, so the desktop environment
+            opens a terminal for it.
     """
     new_desktop_path = output_dir / f"AppImage-{clean_name}.desktop"
     
@@ -289,7 +322,8 @@ def create_desktop_file(original_desktop_path: Path, clean_name: str, icon_exten
     appimage_dir = os.path.join(home_dir, "AppImage")
     
     new_icon_entry = f"Icon={appimage_dir}/{clean_name}{icon_extension}"
-    new_exec_entry = f"Exec={appimage_dir}/_launch_appimage {clean_name} %U"
+    foreground_flag = "--foreground " if is_terminal else ""
+    new_exec_entry = f"Exec={appimage_dir}/_launch_appimage {foreground_flag}{clean_name} %U"
 
     
     try:
@@ -385,6 +419,11 @@ def main():
                 print("Error: No .desktop file found in AppImage")
                 sys.exit(1)
 
+            # Detect whether this is a terminal/TUI app (Terminal=true)
+            is_terminal = is_terminal_app(desktop_file)
+            if is_terminal:
+                print("Detected a terminal/TUI app (Terminal=true) - it will be launched in the foreground.")
+
             # Get icon name from desktop file
             icon_name = parse_icon_name(desktop_file)
             if not icon_name:
@@ -413,7 +452,7 @@ def main():
             print(f"Icon extracted to: {output_icon_path}")
 
             # Create the .desktop file
-            create_desktop_file(desktop_file, clean_name, extension, Path.cwd())
+            create_desktop_file(desktop_file, clean_name, extension, Path.cwd(), is_terminal)
             
             # Check if we're already in the AppImage directory
             home_dir = str(Path.home())

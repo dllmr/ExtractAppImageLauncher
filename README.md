@@ -9,6 +9,8 @@ A simple Python utility that extracts icons and creates desktop entries from App
 - Automatically cleans application names
 - Handles different icon formats (SVG, PNG)
 - Searches multiple locations within the AppImage for icon files
+- Detects terminal/TUI apps (`Terminal=true`) and launches them in the
+  foreground so they get a controlling terminal (GUI apps are backgrounded)
 
 ## Requirements
 
@@ -52,6 +54,9 @@ Alternatively run the script using uv.
 4. Searches for the best matching icon in the extracted files
 5. Copies the icon to the current directory with a cleaned name
 6. Creates a new .desktop file that points to the extracted icon
+7. If the app is a terminal/TUI app (`Terminal=true`), the generated `Exec`
+   line passes `--foreground` to `_launch_appimage` so the app runs attached to
+   the terminal instead of being backgrounded
 
 ## Output
 
